@@ -364,6 +364,7 @@
     }
 
     // 7. 예약 전송
+// 7. 예약 전송 (수정버전: 디버깅 강화)
     function submitReservation() {
         const date = document.getElementById('inputDate').value;
         const room = document.getElementById('inputRoom').value;
@@ -391,7 +392,7 @@
             pax: pax,
             duration: duration,
             startTime: startTime,
-            names: namesArr.join(', ') // "김철수, 이영희" 형태로 저장
+            names: namesArr.join(', ')
         };
 
         if(!confirm(`${date} ${startTime}시\n${room} 예약하시겠습니까?\n참가자: ${payload.names}`)) return;
@@ -405,22 +406,29 @@
         // POST 요청
         fetch(GAS_URL, {
             method: 'POST',
-            body: JSON.stringify(payload) // no-cors 모드 아님 (응답 받아야함)
+            body: JSON.stringify(payload)
         })
-        .then(res => res.json())
-        .then(json => {
-            if(json.status === 'success') {
-                alert(json.message);
-                fetchReservations(); // 데이터 갱신
-                document.getElementById('bookingForm').reset();
-                updateNameInputs(); // 폼 리셋 후 입력칸 초기화
-            } else {
-                alert('실패: ' + json.message);
+        .then(res => res.text()) // 일단 텍스트로 받음
+        .then(text => {
+            try {
+                const json = JSON.parse(text); // JSON 변환 시도
+                if(json.status === 'success') {
+                    alert(json.message);
+                    fetchReservations(); 
+                    document.getElementById('bookingForm').reset();
+                    updateNameInputs();
+                } else {
+                    alert('실패: ' + json.message);
+                }
+            } catch (e) {
+                // JSON이 아닌 경우 (에러 HTML 등)
+                console.error("서버 응답:", text);
+                alert("서버 오류 발생! 콘솔을 확인하거나 권한 설정을 체크하세요.\n응답 내용 앞부분: " + text.substring(0, 50));
             }
         })
         .catch(err => {
             console.error(err);
-            alert('오류가 발생했습니다.');
+            alert('네트워크 오류가 발생했습니다: ' + err);
         })
         .finally(() => showLoading(false));
     }
