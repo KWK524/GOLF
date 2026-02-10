@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스크린골프 예약 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .room-card { transition: 0.3s; cursor: pointer; }
+        .room-card:hover { transform: translateY(-5px); shadow: lg; }
+        .status-badge { font-size: 0.9em; }
+        .reserved-slot { background-color: #ffebee; border-left: 4px solid #dc3545; font-size: 0.85rem; padding: 4px;}
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.8); z-index: 9999; display: none;
+            justify-content: center; align-items: center;
+        }
+    </style>
+</head>
+<body class="bg-light">
+
+<div id="loading" class="loading-overlay">
+    <div class="spinner-border text-primary" role="status"></div>
+</div>
+
+<div class="container py-4">
+    <h2 class="mb-4 text-center fw-bold">⛳ 스크린골프 예약 시스템</h2>
+
+    <h5 class="mb-3">🔴 현재 사용 현황</h5>
+    <div class="row g-3 mb-5" id="roomStatusContainer">
+        </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5>📅 주간 예약 현황</h5>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#reservationModal">
+            + 새 예약하기
+        </button>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="dateTabs">
+        </ul>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered text-center" style="min-width: 600px;">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:10%">시간</th>
+                            <th style="width:18%">Room 1</th>
+                            <th style="width:18%">Room 2</th>
+                            <th style="width:18%">Room 3 (GDR+)</th>
+                            <th style="width:18%">Room 4 (양손)</th>
+                            <th style="width:18%">Room 5 (개인)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="timetableBody">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="reservationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">예약하기</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="bookingForm">
+                    <div class="mb-3">
+                        <label class="form-label">날짜 선택</label>
+                        <input type="date" class="form-control" id="inputDate" required>
+                        <small class="text-muted" id="dateHelp"></small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">방 선택</label>
+                        <select class="form-select" id="inputRoom" required>
+                            <option value="Room 1">Room 1</option>
+                            <option value="Room 2">Room 2</option>
+                            <option value="Room 3">Room 3 (스윙분석기, GDR+)</option>
+                            <option value="Room 4">Room 4 (양손잡이)</option>
+                            <option value="Room 5">Room 5 (개인훈련)</option>
+                        </select>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label">인원수</label>
+                            <select class="form-select" id="inputPax" required>
+                                <option value="1">1명 (최대 1시간)</option>
+                                <option value="2">2명 (최대 2시간)</option>
+                                <option value="3">3명 (최대 3시간)</option>
+                                <option value="4">4명 (최대 3시간)</option>
+                            </select>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">이용 시간</label>
+                            <select class="form-select" id="inputDuration" required>
+                                </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">시작 시간</label>
+                        <select class="form-select" id="inputStartTime" required>
+                            </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">예약자 명단</label>
+                        <div id="nameInputsContainer">
+                            </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="submitReservation()">예약 확정</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    // ==========================================
+    // ⚠️ [중요] 배포한 GAS URL을 여기에 넣으세요
+    // ==========================================
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbzrhaaFAwh7RDeEmU1ezIRSHpZo9t1-2rOHbXq3XiVC-wOqSndpcksB99Ncf2_uW3EJ/exec"; 
+    
+    let allReservations = [];
+    let currentDateTab = new Date(); // 현재 보고 있는 탭의 날짜
+
+    // 초기화
+    document.addEventListener('DOMContentLoaded', () => {
+        initDateTabs();
+        fetchReservations();
+        
+        // 입력 필드 이벤트 리스너
+        document.getElementById('inputDate').addEventListener('change', updateTimeOptions);
+        document.getElementById('inputPax').addEventListener('change', () => {
+            updateDurationOptions();
+            updateNameInputs();
+        });
+        
+        // 초기값 설정
+        document.getElementById('inputDate').min = new Date().toISOString().split("T")[0];
+        updateNameInputs(); // 초기 1명 입력칸
+    });
+
+    // 1. 데이터 가져오기
+    function fetchReservations() {
+        showLoading(true);
+        fetch(GAS_URL)
+            .then(res => res.json())
+            .then(json => {
+                if(json.status === 'success') {
+                    allReservations = json.data;
+                    renderRealTimeStatus();
+                    renderTimetable(currentDateTab);
+                } else {
+                    alert('데이터 로드 실패');
+                }
+            })
+            .catch(err => console.error(err))
+            .finally(() => showLoading(false));
+    }
+
+    // 2. 실시간 현황 렌더링
+    function renderRealTimeStatus() {
+        const container = document.getElementById('roomStatusContainer');
+        container.innerHTML = '';
+        
+        const rooms = [
+            { id: 'Room 1', desc: '일반' },
+            { id: 'Room 2', desc: '일반' },
+            { id: 'Room 3', desc: 'GDR Plus' },
+            { id: 'Room 4', desc: '양손잡이' },
+            { id: 'Room 5', desc: '개인훈련' }
+        ];
+
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        const currentHour = now.getHours();
+
+        rooms.forEach(room => {
+            // 현재 방을 쓰고 있는 예약 찾기
+            const activeRes = allReservations.find(res => {
+                const start = parseInt(res.StartTime);
+                const end = start + parseInt(res.Duration);
+                return res.Date === todayStr && res.Room === room.id && currentHour >= start && currentHour < end;
+            });
+
+            const isOccupied = !!activeRes;
+            const badgeClass = isOccupied ? 'bg-danger' : 'bg-success';
+            const statusText = isOccupied ? `사용 중 (${activeRes.Names})` : '비어 있음';
+
+            const html = `
+                <div class="col-md-2dot4 col-6"> <div class="card room-card shadow-sm h-100 border-${isOccupied ? 'danger' : 'success'}">
+                        <div class="card-body text-center p-2">
+                            <h6 class="card-title fw-bold">${room.id}</h6>
+                            <p class="card-text text-muted small mb-2">${room.desc}</p>
+                            <span class="badge ${badgeClass} status-badge">${statusText}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.innerHTML += html;
+        });
+    }
+
+    // 3. 주간 날짜 탭 생성
+    function initDateTabs() {
+        const tabsContainer = document.getElementById('dateTabs');
+        const today = new Date();
+        
+        for(let i=0; i<7; i++) {
+            const date = new Date(today);
+            date.setDate(today.getDate() + i);
+            const dateStr = date.toISOString().split('T')[0];
+            const dayName = getDayName(date.getDay());
+            
+            const li = document.createElement('li');
+            li.className = 'nav-item';
+            li.innerHTML = `
+                <a class="nav-link ${i===0 ? 'active' : ''}" href="#" 
+                   onclick="switchTab(this, '${dateStr}')">
+                   ${date.getMonth()+1}/${date.getDate()} (${dayName})
+                </a>
+            `;
+            tabsContainer.appendChild(li);
+        }
+        currentDateTab = new Date(today); // 초기값 오늘
+    }
+
+    function switchTab(element, dateStr) {
+        // 탭 활성화 UI 변경
+        document.querySelectorAll('#dateTabs .nav-link').forEach(el => el.classList.remove('active'));
+        element.classList.add('active');
+        
+        currentDateTab = new Date(dateStr);
+        renderTimetable(currentDateTab);
+    }
+
+    // 4. 타임테이블 렌더링
+    function renderTimetable(targetDateObj) {
+        const tbody = document.getElementById('timetableBody');
+        tbody.innerHTML = '';
+        const targetDateStr = targetDateObj.toISOString().split('T')[0];
+        
+        // 운영 시간 계산
+        const day = targetDateObj.getDay(); // 0(일)~6(토)
+        let startHour, endHour;
+
+        // 토(6), 일(0), 월(1), 화(2), 수(3) -> 19~22
+        if ([6, 0, 1, 2, 3].includes(day)) {
+            startHour = 19; endHour = 22;
+        } else if (day === 4) { // 목요일 -> 17~22
+            startHour = 17; endHour = 22;
+        } else if (day === 5) { // 금요일 -> 06~22
+            startHour = 6; endHour = 22;
+        }
+
+        // 시간 행 생성
+        for (let h = startHour; h < endHour; h++) {
+            let rowHtml = `<tr><td class="align-middle">${h}:00</td>`;
+            
+            for (let r = 1; r <= 5; r++) {
+                const roomName = `Room ${r}`;
+                
+                // 해당 셀에 예약이 있는지 확인
+                const booking = allReservations.find(res => {
+                    const rStart = parseInt(res.StartTime);
+                    const rDuration = parseInt(res.Duration);
+                    return res.Date === targetDateStr && res.Room === roomName && h >= rStart && h < (rStart + rDuration);
+                });
+
+                if (booking) {
+                    // 예약 정보 표시 (이름 포함)
+                    rowHtml += `<td class="reserved-slot align-middle">
+                        <div class="fw-bold">${booking.Names}</div>
+                        <small>(${booking.Pax}명)</small>
+                    </td>`;
+                } else {
+                    rowHtml += `<td></td>`;
+                }
+            }
+            rowHtml += `</tr>`;
+            tbody.innerHTML += rowHtml;
+        }
+    }
+
+    // 5. 모달: 요일별 시간 옵션 업데이트
+    function updateTimeOptions() {
+        const dateInput = document.getElementById('inputDate').value;
+        if(!dateInput) return;
+
+        const date = new Date(dateInput);
+        const day = date.getDay();
+        const helpText = document.getElementById('dateHelp');
+        const timeSelect = document.getElementById('inputStartTime');
+        timeSelect.innerHTML = '';
+
+        let start, end, info;
+        
+        if ([6, 0, 1, 2, 3].includes(day)) { // 토~수
+            start = 19; end = 22; info = "운영시간: 19:00 ~ 22:00";
+        } else if (day === 4) { // 목
+            start = 17; end = 22; info = "운영시간: 17:00 ~ 22:00";
+        } else { // 금
+            start = 6; end = 22; info = "운영시간: 06:00 ~ 22:00";
+        }
+        
+        helpText.innerText = info;
+
+        for(let i=start; i<end; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+            option.text = `${i}:00`;
+            timeSelect.appendChild(option);
+        }
+    }
+
+    // 6. 모달: 인원수별 시간 제한 및 이름 입력칸 생성
+    function updateDurationOptions() {
+        const pax = parseInt(document.getElementById('inputPax').value);
+        const durationSelect = document.getElementById('inputDuration');
+        durationSelect.innerHTML = '';
+        
+        let maxTime = 1;
+        if(pax === 2) maxTime = 2;
+        if(pax >= 3) maxTime = 3;
+
+        for(let i=1; i<=maxTime; i++) {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.text = `${i}시간`;
+            durationSelect.appendChild(opt);
+        }
+        // 기본값은 최대로 선택해주면 편함
+        durationSelect.value = maxTime;
+    }
+
+    function updateNameInputs() {
+        const pax = parseInt(document.getElementById('inputPax').value);
+        const container = document.getElementById('nameInputsContainer');
+        container.innerHTML = '';
+
+        for(let i=1; i<=pax; i++) {
+            const div = document.createElement('div');
+            div.className = 'input-group mb-2';
+            div.innerHTML = `
+                <span class="input-group-text">참가자 ${i}</span>
+                <input type="text" class="form-control name-input" placeholder="이름 입력" required>
+            `;
+            container.appendChild(div);
+        }
+    }
+
+    // 7. 예약 전송
+    function submitReservation() {
+        const date = document.getElementById('inputDate').value;
+        const room = document.getElementById('inputRoom').value;
+        const pax = document.getElementById('inputPax').value;
+        const duration = document.getElementById('inputDuration').value;
+        const startTime = document.getElementById('inputStartTime').value;
+        
+        // 이름 수집
+        const nameInputs = document.querySelectorAll('.name-input');
+        let namesArr = [];
+        let allFilled = true;
+        nameInputs.forEach(input => {
+            if(!input.value.trim()) allFilled = false;
+            namesArr.push(input.value.trim());
+        });
+
+        if(!date || !room || !allFilled) {
+            alert('모든 정보를 입력해주세요.');
+            return;
+        }
+
+        const payload = {
+            date: date,
+            room: room,
+            pax: pax,
+            duration: duration,
+            startTime: startTime,
+            names: namesArr.join(', ') // "김철수, 이영희" 형태로 저장
+        };
+
+        if(!confirm(`${date} ${startTime}시\n${room} 예약하시겠습니까?\n참가자: ${payload.names}`)) return;
+
+        // 모달 닫기 및 로딩 시작
+        const modalEl = document.getElementById('reservationModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        modal.hide();
+        showLoading(true);
+
+        // POST 요청
+        fetch(GAS_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload) // no-cors 모드 아님 (응답 받아야함)
+        })
+        .then(res => res.json())
+        .then(json => {
+            if(json.status === 'success') {
+                alert(json.message);
+                fetchReservations(); // 데이터 갱신
+                document.getElementById('bookingForm').reset();
+                updateNameInputs(); // 폼 리셋 후 입력칸 초기화
+            } else {
+                alert('실패: ' + json.message);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            alert('오류가 발생했습니다.');
+        })
+        .finally(() => showLoading(false));
+    }
+
+    function showLoading(show) {
+        document.getElementById('loading').style.display = show ? 'flex' : 'none';
+    }
+    
+    function getDayName(idx) {
+        const days = ['일','월','화','수','목','금','토'];
+        return days[idx];
+    }
+</script>
+</body>
+</html>
