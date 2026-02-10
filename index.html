@@ -177,6 +177,7 @@
             .then(res => res.json())
             .then(json => {
                 if(json.status === 'success') {
+                    console.log("데이터 로드 성공:", json.data); // [디버깅] 데이터 들어오는지 확인
                     allReservations = json.data;
                     renderRoomStatus();
                     renderTimetable(currentTabDate);
@@ -184,6 +185,15 @@
             })
             .catch(err => console.error(err))
             .finally(() => showLoading(false));
+    }
+
+    // [수정됨] 날짜 비교 헬퍼 함수 (날짜 형식 오류 해결의 핵심 ⭐)
+    function isSameDate(date1, date2) {
+        if(!date1 || !date2) return false;
+        // T 뒷부분(시간)을 잘라내고 YYYY-MM-DD만 비교
+        const d1 = String(date1).split('T')[0];
+        const d2 = String(date2).split('T')[0];
+        return d1 === d2;
     }
 
     // 2. 초기 세팅
@@ -255,7 +265,7 @@
         container.appendChild(div);
     }
 
-    // 4. 시작 시간 옵션 (문구 변경 및 시간제한 적용)
+    // 4. 시작 시간 옵션
     function updateTimeOptions() {
         const dateVal = document.getElementById('inputDate').value;
         const durationVal = parseInt(document.getElementById('inputDuration').value);
@@ -272,7 +282,6 @@
         
         let openHour, closeHour;
         
-        // 요일별 운영시간
         if (day === 4) { // 목
             openHour = 17; closeHour = 22;
         } else if (day === 5) { // 금
@@ -281,7 +290,6 @@
             openHour = 19; closeHour = 22;
         }
 
-        // [수정] 안내 문구 통일
         helpText.innerText = "운영 종료 시간: 22:00";
 
         const lastPossibleStart = closeHour - durationVal;
@@ -344,19 +352,26 @@
         listDiv.innerHTML = '';
         
         const todayStr = new Date().toISOString().split('T')[0];
-        const futureRes = allReservations.filter(r => r.Date >= todayStr);
+        // [수정됨] 날짜 필터링 비교 로직 개선
+        const futureRes = allReservations.filter(r => {
+             // 문자열로 변환하여 비교
+             const rDate = String(r.Date).split('T')[0];
+             return rDate >= todayStr;
+        });
         
         if(futureRes.length === 0) {
             listDiv.innerHTML = '<p class="text-center p-3">예약 내역이 없습니다.</p>';
         } else {
-            futureRes.sort((a,b) => (a.Date + a.StartTime).localeCompare(b.Date + b.StartTime));
+            // 정렬
+            futureRes.sort((a,b) => (String(a.Date) + a.StartTime).localeCompare(String(b.Date) + b.StartTime));
             
             futureRes.forEach(res => {
+                const displayDate = String(res.Date).split('T')[0]; // 날짜 표시용
                 const item = document.createElement('div');
                 item.className = 'list-group-item d-flex justify-content-between align-items-center';
                 item.innerHTML = `
                     <div>
-                        <span class="badge bg-primary me-2">${res.Date}</span>
+                        <span class="badge bg-primary me-2">${displayDate}</span>
                         <span class="fw-bold">${res.StartTime}시 (${res.Duration}시간)</span>
                         <span class="ms-2 text-muted">${res.Room}</span>
                         <div class="small text-muted">예약자: ${res.Names}</div>
@@ -403,7 +418,7 @@
                 bootstrap.Modal.getInstance(document.getElementById('manageModal')).hide();
                 setTimeout(() => {
                     openNewReservation(); 
-                    document.getElementById('inputDate').value = targetRes.Date;
+                    document.getElementById('inputDate').value = String(targetRes.Date).split('T')[0];
                     document.getElementById('inputRoom').value = targetRes.Room;
                     updateTimeOptions(); 
                     alert('기존 예약이 삭제되었습니다. 수정할 내용을 입력 후 다시 예약해주세요.');
@@ -446,7 +461,7 @@
         new bootstrap.Modal(document.getElementById('reservationModal')).show();
     }
 
-    // [수정됨] 실시간 현황 렌더링 (운영시간 체크 로직 추가)
+    // [수정됨] 실시간 현황 렌더링 (isSameDate 사용)
     function renderRoomStatus() {
         const container = document.getElementById('roomStatusContainer');
         container.innerHTML = '';
@@ -461,9 +476,8 @@
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
         const currentHour = now.getHours();
-        const day = now.getDay(); // 0(일)~6(토)
+        const day = now.getDay(); 
 
-        // 1. 오늘 운영시간 확인
         let openHour, closeHour;
         if (day === 4) { // 목
             openHour = 17; closeHour = 22;
@@ -473,22 +487,21 @@
             openHour = 19; closeHour = 22;
         }
 
-        // 2. 현재 시간이 운영시간인지 체크
         const isClosed = (currentHour < openHour || currentHour >= closeHour);
 
         rooms.forEach(room => {
             let statusClass, statusText;
 
             if (isClosed) {
-                // 운영시간 아님 (회색)
                 statusClass = 'bg-closed';
                 statusText = '이용 불가 (운영시간 아님)';
             } else {
-                // 운영시간 중 -> 예약 확인 (초록/빨강)
                 const activeRes = allReservations.find(res => {
+                    // [핵심] 날짜 비교 안전하게 처리
+                    const sameDay = isSameDate(res.Date, todayStr);
                     const start = parseInt(res.StartTime);
                     const end = start + parseInt(res.Duration);
-                    return res.Date === todayStr && res.Room === room.id && currentHour >= start && currentHour < end;
+                    return sameDay && res.Room === room.id && currentHour >= start && currentHour < end;
                 });
 
                 if (activeRes) {
@@ -537,6 +550,7 @@
         renderTimetable(currentTabDate);
     }
     
+    // [수정됨] 주간 현황표 렌더링 (isSameDate 사용)
     function renderTimetable(targetDateObj) {
         const tbody = document.getElementById('timetableBody');
         tbody.innerHTML = '';
@@ -553,13 +567,15 @@
             for (let r = 1; r <= 5; r++) {
                 const roomName = `Room ${r}`;
                 const booking = allReservations.find(res => {
+                    // [핵심] 날짜 비교 안전하게 처리
+                    const sameDay = isSameDate(res.Date, targetDateStr);
                     const rStart = parseInt(res.StartTime);
                     const rDuration = parseInt(res.Duration);
-                    return res.Date === targetDateStr && res.Room === roomName && h >= rStart && h < (rStart + rDuration);
+                    return sameDay && res.Room === roomName && h >= rStart && h < (rStart + rDuration);
                 });
 
                 if (booking) {
-                    rowHtml += `<td class="bg-occupied align-middle"><div class="fw-bold small">${booking.Names}</div></td>`;
+                    rowHtml += `<td class="bg-occupied align-middle text-white"><div class="fw-bold small">${booking.Names}</div></td>`;
                 } else {
                     rowHtml += `<td></td>`;
                 }
