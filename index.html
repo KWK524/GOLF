@@ -157,12 +157,13 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     // ==========================================
-    // ⚠️ [중요] 배포된 GAS URL을 확인하세요
+    // ⚠️ [중요] 배포된 GAS URL을 여기에 입력하세요
     // ==========================================
     const GAS_URL = "https://script.google.com/macros/s/AKfycbz-svKiYRmzGCw_J4aPONhtgR4La-YKTC-s4jCvOFh20x4uBmYdvdsulBp_qTxaUzxW/exec"; 
-    
+
     let allReservations = [];
-    let currentTabDate = new Date(); // 브라우저(사우디 현지 PC) 시간 기준
+    // 초기 탭 날짜는 '오늘' (문자열 YYYY-MM-DD 로 관리)
+    let currentTabDateStr = getFormatDate(new Date()); 
 
     document.addEventListener('DOMContentLoaded', () => {
         initDateDropdown(); 
@@ -170,39 +171,177 @@
         fetchReservations(); 
     });
 
+    // 1. 날짜 포맷 헬퍼 함수 (무조건 YYYY-MM-DD 문자열 반환)
+    function getFormatDate(dateObj) {
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    // 2. 데이터 가져오기
     function fetchReservations() {
         showLoading(true);
         fetch(GAS_URL)
             .then(res => res.json())
             .then(json => {
                 if(json.status === 'success') {
-                    console.log("서버 데이터:", json.data); // 확인용 로그
                     allReservations = json.data;
                     renderRoomStatus();
-                    renderTimetable(currentTabDate);
+                    renderTimetable(currentTabDateStr);
                 }
             })
             .catch(err => console.error(err))
             .finally(() => showLoading(false));
     }
 
-    // [수정됨] 날짜 비교 로직 단순화 (문자열 대 문자열 비교)
-    function isSameDate(dateStrFromData, dateObjFromTab) {
-        if(!dateStrFromData || !dateObjFromTab) return false;
+    // 3. 주간 타임테이블 탭 생성
+    function initTimetableTabs() {
+        const ul = document.getElementById('timetableTabs');
+        ul.innerHTML = '';
+        const today = new Date();
         
-        // 데이터 날짜: "2026-02-10" (GAS에서 이미 포맷팅됨)
-        // 탭 날짜: Date 객체를 "2026-02-10" 문자열로 변환
-        
-        // 사우디 로컬 시간 기준 날짜 문자열 생성 (yyyy-mm-dd)
-        const year = dateObjFromTab.getFullYear();
-        const month = String(dateObjFromTab.getMonth() + 1).padStart(2, '0');
-        const day = String(dateObjFromTab.getDate()).padStart(2, '0');
-        const tabDateStr = `${year}-${month}-${day}`;
-        
-        // 데이터에 혹시 T가 붙어있을 경우 대비해 앞 10자리만 비교
-        return String(dateStrFromData).substring(0, 10) === tabDateStr;
+        for(let i=0; i<7; i++) {
+            const d = new Date(today);
+            d.setDate(today.getDate() + i);
+            const dateStr = getFormatDate(d); // YYYY-MM-DD
+            
+            // 첫번째 탭 활성화
+            const activeClass = (i === 0) ? 'active' : '';
+            
+            ul.innerHTML += `
+                <li class="nav-item">
+                    <a class="nav-link ${activeClass}" href="#" onclick="switchTab('${dateStr}', this); return false;">
+                        ${d.getMonth()+1}/${d.getDate()} (${getDayName(d.getDay())})
+                    </a>
+                </li>
+            `;
+        }
     }
 
+    function switchTab(dateStr, el) {
+        document.querySelectorAll('#timetableTabs .nav-link').forEach(a => a.classList.remove('active'));
+        el.classList.add('active');
+        currentTabDateStr = dateStr;
+        renderTimetable(currentTabDateStr);
+    }
+    
+    // 4. [핵심 수정] 타임테이블 렌더링 (문자열 비교 강화)
+    function renderTimetable(targetDateStr) {
+        const tbody = document.getElementById('timetableBody');
+        tbody.innerHTML = '';
+        
+        // targetDateStr: "2026-02-10" 형식
+        const targetDateObj = new Date(targetDateStr);
+        const day = targetDateObj.getDay();
+        
+        // 운영 시간 설정
+        let start, end;
+        if ([6, 0, 1, 2, 3].includes(day)) { start = 19; end = 22; } // 토~수
+        else if (day === 4) { start = 17; end = 22; } // 목
+        else { start = 6; end = 22; } // 금
+
+        for (let h = start; h < end; h++) {
+            let rowHtml = `<tr><td class="align-middle">${h}:00</td>`;
+            
+            for (let r = 1; r <= 5; r++) {
+                const roomName = `Room ${r}`;
+                
+                // [수정] 예약 찾기 로직 강화
+                const booking = allReservations.find(res => {
+                    // 1. 날짜 비교: 앞 10자리(YYYY-MM-DD)만 잘라서 비교 + 공백제거
+                    const resDate = String(res.Date).substring(0, 10).trim();
+                    const isDateMatch = (resDate === targetDateStr);
+
+                    // 2. 방 이름 비교
+                    const isRoomMatch = (res.Room === roomName);
+
+                    // 3. 시간 비교 (숫자로 변환해서 비교)
+                    const resStart = parseInt(res.StartTime);
+                    const resDuration = parseInt(res.Duration);
+                    const isTimeMatch = (h >= resStart && h < (resStart + resDuration));
+
+                    return isDateMatch && isRoomMatch && isTimeMatch;
+                });
+
+                if (booking) {
+                    // 예약 있으면 빨간색 + 이름
+                    rowHtml += `<td class="bg-occupied align-middle text-white" style="font-size:0.85rem;">
+                        <div class="fw-bold">${booking.Names}</div>
+                    </td>`;
+                } else {
+                    rowHtml += `<td></td>`;
+                }
+            }
+            rowHtml += `</tr>`;
+            tbody.innerHTML += rowHtml;
+        }
+    }
+
+    // 5. [핵심 수정] 실시간 현황 렌더링
+    function renderRoomStatus() {
+        const container = document.getElementById('roomStatusContainer');
+        container.innerHTML = '';
+        
+        const rooms = [
+            { id: 'Room 1', desc: '일반' }, { id: 'Room 2', desc: '일반' },
+            { id: 'Room 3', desc: 'GDR+' }, { id: 'Room 4', desc: '양손' }, { id: 'Room 5', desc: '개인' }
+        ];
+
+        const now = new Date();
+        const todayStr = getFormatDate(now); // "2026-02-10"
+        const currentHour = now.getHours();
+        const day = now.getDay(); 
+
+        let openHour, closeHour;
+        if (day === 4) { openHour = 17; closeHour = 22; }
+        else if (day === 5) { openHour = 6; closeHour = 22; }
+        else { openHour = 19; closeHour = 22; }
+
+        const isClosed = (currentHour < openHour || currentHour >= closeHour);
+
+        rooms.forEach(room => {
+            let statusClass, statusText;
+
+            if (isClosed) {
+                statusClass = 'bg-closed';
+                statusText = '이용 불가 (운영시간 아님)';
+            } else {
+                const activeRes = allReservations.find(res => {
+                    const resDate = String(res.Date).substring(0, 10).trim();
+                    const start = parseInt(res.StartTime);
+                    const end = start + parseInt(res.Duration);
+                    
+                    return (resDate === todayStr) && 
+                           (res.Room === room.id) && 
+                           (currentHour >= start && currentHour < end);
+                });
+
+                if (activeRes) {
+                    statusClass = 'bg-occupied';
+                    statusText = `사용 중 (${activeRes.Names})`;
+                } else {
+                    statusClass = 'bg-available';
+                    statusText = '사용 가능';
+                }
+            }
+
+            const col = document.createElement('div');
+            col.className = 'col-6 col-md-2dot4'; 
+            col.style.width = '20%'; 
+            if(window.innerWidth < 768) col.style.width = '50%';
+
+            col.innerHTML = `
+                <div class="card room-card shadow-sm border-0">
+                    <div class="fw-bold">${room.id}</div>
+                    <small class="text-muted">${room.desc}</small>
+                    <div class="room-status-box ${statusClass}">${statusText}</div>
+                </div>`;
+            container.appendChild(col);
+        });
+    }
+
+    // 6. 예약 모달 날짜 옵션
     function initDateDropdown() {
         const select = document.getElementById('inputDate');
         select.innerHTML = '<option value="">-선택해주세요-</option>';
@@ -211,18 +350,13 @@
         for(let i=0; i<7; i++) {
             const d = new Date(today);
             d.setDate(today.getDate() + i);
-            
-            // 로컬 시간 기준 포맷팅
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            const val = `${year}-${month}-${day}`;
-            
+            const val = getFormatDate(d); // YYYY-MM-DD
             const txt = `${d.getMonth()+1}월 ${d.getDate()}일 (${getDayName(d.getDay())})`;
             select.innerHTML += `<option value="${val}">${txt}</option>`;
         }
     }
 
+    // 7. 기타 UI 로직 (인원수, 시간선택 등 기존 유지)
     function handlePaxChange() {
         const paxVal = document.getElementById('inputPax').value;
         const durationSelect = document.getElementById('inputDuration');
@@ -254,11 +388,8 @@
         for(let i=1; i<=maxTime; i++) {
             durationSelect.innerHTML += `<option value="${i}">${i}시간</option>`;
         }
-
         nameContainer.innerHTML = '';
-        for(let i=0; i<initialNameCount; i++) {
-            addNameField(false); 
-        }
+        for(let i=0; i<initialNameCount; i++) addNameField(false);
         updateTimeOptions(); 
     }
 
@@ -266,11 +397,8 @@
         const container = document.getElementById('nameListContainer');
         const div = document.createElement('div');
         div.className = 'input-group mb-2';
-        
         let html = `<input type="text" class="form-control name-input" placeholder="이름" required>`;
-        if(showDeleteBtn) {
-            html += `<button type="button" class="btn btn-outline-danger" onclick="this.parentElement.remove()">삭제</button>`;
-        }
+        if(showDeleteBtn) html += `<button type="button" class="btn btn-outline-danger" onclick="this.parentElement.remove()">삭제</button>`;
         div.innerHTML = html;
         container.appendChild(div);
     }
@@ -290,9 +418,9 @@
         const day = date.getDay();
         
         let openHour, closeHour;
-        if (day === 4) { openHour = 17; closeHour = 22; } // 목
-        else if (day === 5) { openHour = 6; closeHour = 22; } // 금
-        else { openHour = 19; closeHour = 22; } // 토~수
+        if (day === 4) { openHour = 17; closeHour = 22; }
+        else if (day === 5) { openHour = 6; closeHour = 22; }
+        else { openHour = 19; closeHour = 22; }
 
         helpText.innerText = "운영 종료 시간: 22:00";
         const lastPossibleStart = closeHour - durationVal;
@@ -300,12 +428,10 @@
         for (let h = openHour; h <= lastPossibleStart; h++) {
             timeSelect.innerHTML += `<option value="${h}">${h}:00 (종료 ${h+durationVal}:00)</option>`;
         }
-        
-        if (lastPossibleStart < openHour) {
-            timeSelect.innerHTML = '<option value="">이용 가능한 시간이 없습니다</option>';
-        }
+        if (lastPossibleStart < openHour) timeSelect.innerHTML = '<option value="">이용 가능한 시간이 없습니다</option>';
     }
 
+    // 8. 예약 제출
     function submitReservation() {
         const date = document.getElementById('inputDate').value;
         const room = document.getElementById('inputRoom').value;
@@ -319,10 +445,8 @@
         let namesArr = [];
         nameInputs.forEach(input => { if(input.value.trim()) namesArr.push(input.value.trim()); });
 
-        if(!date || !room || !pax || !duration || !startTime || !pw || !pwConfirm) {
-            alert('모든 항목을 선택하고 입력해주세요.'); return;
-        }
-        if(namesArr.length === 0) { alert('참가자 이름을 최소 1명 입력해주세요.'); return; }
+        if(!date || !room || !pax || !duration || !startTime || !pw || !pwConfirm) { alert('모든 항목을 입력하세요.'); return; }
+        if(namesArr.length === 0) { alert('참가자 이름을 입력하세요.'); return; }
         if(pw !== pwConfirm) { alert('비밀번호가 일치하지 않습니다.'); return; }
 
         const payload = {
@@ -336,27 +460,21 @@
             password: pw
         };
 
-        if(!confirm(`예약하시겠습니까?\n날짜: ${date}\n시간: ${startTime}시 (${duration}시간)\n룸: ${room}`)) return;
-
+        if(!confirm(`예약하시겠습니까?\n${date} ${startTime}시 (${duration}시간)`)) return;
         processApi(payload, () => {
-            const modal = bootstrap.Modal.getInstance(document.getElementById('reservationModal'));
-            modal.hide();
+            bootstrap.Modal.getInstance(document.getElementById('reservationModal')).hide();
         });
     }
 
+    // 9. 취소/변경 관리
     function openCancelModifyModal() {
         const listDiv = document.getElementById('manageList');
         listDiv.innerHTML = '';
-        
-        // 현재 날짜 (로컬 기준) 문자열 구하기
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const todayStr = `${year}-${month}-${day}`;
-        
+        const todayStr = getFormatDate(new Date());
+
         const futureRes = allReservations.filter(r => {
-             return String(r.Date).substring(0, 10) >= todayStr;
+             // 날짜 비교 (오늘 포함 미래)
+             return String(r.Date).substring(0, 10).trim() >= todayStr;
         });
         
         if(futureRes.length === 0) {
@@ -365,12 +483,11 @@
             futureRes.sort((a,b) => (String(a.Date) + a.StartTime).localeCompare(String(b.Date) + b.StartTime));
             
             futureRes.forEach(res => {
-                const displayDate = String(res.Date).substring(0, 10);
                 const item = document.createElement('div');
                 item.className = 'list-group-item d-flex justify-content-between align-items-center';
                 item.innerHTML = `
                     <div>
-                        <span class="badge bg-primary me-2">${displayDate}</span>
+                        <span class="badge bg-primary me-2">${String(res.Date).substring(0, 10)}</span>
                         <span class="fw-bold">${res.StartTime}시 (${res.Duration}시간)</span>
                         <span class="ms-2 text-muted">${res.Room}</span>
                         <div class="small text-muted">예약자: ${res.Names}</div>
@@ -378,8 +495,7 @@
                     <div>
                         <button class="btn btn-sm btn-outline-warning me-1" onclick="modifyReservation('${res.ID}')">변경</button>
                         <button class="btn btn-sm btn-outline-danger" onclick="cancelReservation('${res.ID}')">취소</button>
-                    </div>
-                `;
+                    </div>`;
                 listDiv.appendChild(item);
             });
         }
@@ -387,19 +503,17 @@
     }
 
     function cancelReservation(id) {
-        const pw = prompt("예약 시 설정한 비밀번호를 입력하세요:");
+        const pw = prompt("비밀번호 입력:");
         if(!pw) return;
-        const payload = { action: 'cancel', id: id, password: pw };
-        processApi(payload, () => {
-            const modal = bootstrap.Modal.getInstance(document.getElementById('manageModal'));
-            modal.hide();
+        processApi({ action: 'cancel', id: id, password: pw }, () => {
+            bootstrap.Modal.getInstance(document.getElementById('manageModal')).hide();
         });
     }
 
     function modifyReservation(id) {
         const targetRes = allReservations.find(r => String(r.ID) === String(id));
         if(!targetRes) return;
-        const pw = prompt("변경(기존 예약 삭제)을 위해 비밀번호를 입력하세요:");
+        const pw = prompt("변경(삭제)을 위한 비밀번호 입력:");
         if(!pw) return;
 
         showLoading(true);
@@ -417,12 +531,19 @@
                     document.getElementById('inputDate').value = String(targetRes.Date).substring(0, 10);
                     document.getElementById('inputRoom').value = targetRes.Room;
                     updateTimeOptions(); 
-                    alert('기존 예약이 삭제되었습니다. 수정할 내용을 입력 후 다시 예약해주세요.');
+                    alert('기존 예약 삭제 완료. 내용을 수정한 뒤 다시 예약해주세요.');
                 }, 500);
-            } else {
-                alert(json.message);
-            }
+            } else { alert(json.message); }
         });
+    }
+
+    function openNewReservation() {
+        document.getElementById('bookingForm').reset();
+        document.getElementById('nameListContainer').innerHTML = '';
+        document.getElementById('btnAddName').style.display = 'none';
+        document.getElementById('inputDuration').innerHTML = '<option value="">-선택-</option>';
+        document.getElementById('inputStartTime').innerHTML = '<option value="">-선택해주세요-</option>';
+        new bootstrap.Modal(document.getElementById('reservationModal')).show();
     }
 
     function processApi(payload, onSuccess) {
@@ -437,139 +558,10 @@
                 alert(json.message);
                 fetchReservations();
                 if(onSuccess) onSuccess();
-            } else {
-                alert('실패: ' + json.message);
-            }
+            } else { alert('실패: ' + json.message); }
         })
         .catch(err => { console.error(err); alert('오류 발생'); })
         .finally(() => showLoading(false));
-    }
-
-    function openNewReservation() {
-        document.getElementById('bookingForm').reset();
-        document.getElementById('nameListContainer').innerHTML = '';
-        document.getElementById('btnAddName').style.display = 'none';
-        document.getElementById('inputDuration').innerHTML = '<option value="">-선택-</option>';
-        document.getElementById('inputStartTime').innerHTML = '<option value="">-선택해주세요-</option>';
-        new bootstrap.Modal(document.getElementById('reservationModal')).show();
-    }
-
-    // [수정됨] 실시간 현황 (사우디 시간 + 로컬 비교)
-    function renderRoomStatus() {
-        const container = document.getElementById('roomStatusContainer');
-        container.innerHTML = '';
-        const rooms = [
-            { id: 'Room 1', desc: '일반' }, { id: 'Room 2', desc: '일반' },
-            { id: 'Room 3', desc: 'GDR+' }, { id: 'Room 4', desc: '양손' }, { id: 'Room 5', desc: '개인' }
-        ];
-
-        // 현재 클라이언트(브라우저) 시간 기준
-        const now = new Date();
-        const currentHour = now.getHours();
-        const day = now.getDay(); 
-        
-        let openHour, closeHour;
-        if (day === 4) { openHour = 17; closeHour = 22; }
-        else if (day === 5) { openHour = 6; closeHour = 22; }
-        else { openHour = 19; closeHour = 22; }
-
-        const isClosed = (currentHour < openHour || currentHour >= closeHour);
-
-        rooms.forEach(room => {
-            let statusClass, statusText;
-            if (isClosed) {
-                statusClass = 'bg-closed';
-                statusText = '이용 불가 (운영시간 아님)';
-            } else {
-                const activeRes = allReservations.find(res => {
-                    const sameDay = isSameDate(res.Date, now);
-                    const start = parseInt(res.StartTime);
-                    const end = start + parseInt(res.Duration);
-                    return sameDay && res.Room === room.id && currentHour >= start && currentHour < end;
-                });
-
-                if (activeRes) {
-                    statusClass = 'bg-occupied';
-                    statusText = `사용 중 (${activeRes.Names})`;
-                } else {
-                    statusClass = 'bg-available';
-                    statusText = '사용 가능';
-                }
-            }
-
-            const col = document.createElement('div');
-            col.className = 'col-6 col-md-2dot4'; 
-            col.style.width = '20%'; 
-            if(window.innerWidth < 768) col.style.width = '50%';
-            col.innerHTML = `
-                <div class="card room-card shadow-sm border-0">
-                    <div class="fw-bold">${room.id}</div>
-                    <small class="text-muted">${room.desc}</small>
-                    <div class="room-status-box ${statusClass}">${statusText}</div>
-                </div>`;
-            container.appendChild(col);
-        });
-    }
-
-    function initTimetableTabs() {
-        const ul = document.getElementById('timetableTabs');
-        ul.innerHTML = '';
-        const today = new Date();
-        for(let i=0; i<7; i++) {
-            const d = new Date(today);
-            d.setDate(today.getDate() + i);
-            
-            // 탭에 저장할 날짜 문자열 생성 (yyyy-mm-dd)
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            const dateStr = `${year}-${month}-${day}`;
-            
-            ul.innerHTML += `<li class="nav-item"><a class="nav-link ${i===0?'active':''}" href="#" onclick="switchTab('${dateStr}', this); return false;">${d.getMonth()+1}/${d.getDate()}</a></li>`;
-        }
-    }
-
-    function switchTab(dateStr, el) {
-        document.querySelectorAll('#timetableTabs .nav-link').forEach(a => a.classList.remove('active'));
-        el.classList.add('active');
-        currentTabDate = new Date(dateStr); // 문자열을 다시 Date로 변환하지만, 비교는 문자열로 할 예정
-        renderTimetable(currentTabDate);
-    }
-    
-    // [수정됨] 타임테이블 렌더링 (isSameDate 사용)
-    function renderTimetable(targetDateObj) {
-        const tbody = document.getElementById('timetableBody');
-        tbody.innerHTML = '';
-        
-        // 날짜 객체를 이용해 요일 계산
-        const day = targetDateObj.getDay();
-        
-        let start, end;
-        if ([6, 0, 1, 2, 3].includes(day)) { start = 19; end = 22; }
-        else if (day === 4) { start = 17; end = 22; }
-        else { start = 6; end = 22; }
-
-        for (let h = start; h < end; h++) {
-            let rowHtml = `<tr><td class="align-middle">${h}:00</td>`;
-            for (let r = 1; r <= 5; r++) {
-                const roomName = `Room ${r}`;
-                const booking = allReservations.find(res => {
-                    // 여기서 targetDateObj는 탭에서 선택한 날짜
-                    return isSameDate(res.Date, targetDateObj) && 
-                           res.Room === roomName && 
-                           h >= parseInt(res.StartTime) && 
-                           h < (parseInt(res.StartTime) + parseInt(res.Duration));
-                });
-
-                if (booking) {
-                    rowHtml += `<td class="bg-occupied align-middle text-white"><div class="fw-bold small">${booking.Names}</div></td>`;
-                } else {
-                    rowHtml += `<td></td>`;
-                }
-            }
-            rowHtml += `</tr>`;
-            tbody.innerHTML += rowHtml;
-        }
     }
 
     function showLoading(show) { document.getElementById('loading').style.display = show ? 'flex' : 'none'; }
