@@ -6,149 +6,129 @@
     <title>스크린골프 예약 시스템</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        .room-card { transition: 0.3s; min-height: 120px; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        .room-status-box { font-weight: bold; padding: 5px 10px; border-radius: 5px; margin-top: 5px; width: 100%; text-align: center; font-size: 0.9rem;}
-        
-        /* 상태별 색상 */
-        .bg-available { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; } /* 초록 */
-        .bg-occupied { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; } /* 빨강 */
-        .bg-closed { background-color: #e9ecef; color: #6c757d; border: 1px solid #dee2e6; } /* 회색 (운영시간 아님) */
-
-        .loading-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255,255,255,0.8); z-index: 9999; display: none;
-            justify-content: center; align-items: center;
-        }
+        body { background-color: #f8f9fa; font-family: 'Noto Sans KR', sans-serif; }
+        .room-box { border: 1px solid #ddd; border-radius: 10px; padding: 15px; margin-bottom: 10px; text-align: center; color: white; transition: 0.3s; }
+        .status-available { background-color: #28a745; } /* 초록 */
+        .status-occupied { background-color: #dc3545; } /* 빨강 */
+        .status-closed { background-color: #6c757d; } /* 회색 */
+        .schedule-table th, .schedule-table td { text-align: center; vertical-align: middle; height: 50px; }
+        .reserved-cell { background-color: #ffc107; font-size: 0.8em; font-weight: bold; border-radius: 5px; }
+        .loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.5); z-index: 9999; display:none; justify-content: center; align-items: center; color: white; font-size: 20px;}
     </style>
 </head>
-<body class="bg-light">
+<body>
 
-<div id="loading" class="loading-overlay">
-    <div class="spinner-border text-primary" role="status"></div>
-</div>
+<div class="loading-overlay" id="loadingOverlay">처리 중...</div>
 
 <div class="container py-4">
-    <h2 class="mb-4 text-center fw-bold">⛳ 스크린골프 예약 시스템</h2>
+    <h2 class="text-center mb-4">⛳ 스크린골프 예약 시스템</h2>
 
-    <h5 class="mb-3">🔴 현재 룸 사용 현황</h5>
-    <div class="row g-2 mb-4" id="roomStatusContainer">
+    <div class="row mb-4" id="statusBoard">
         </div>
 
-    <div class="d-flex justify-content-center gap-3 mb-4">
-        <button class="btn btn-primary btn-lg" onclick="openNewReservation()">+ 새 예약하기</button>
-        <button class="btn btn-outline-secondary btn-lg" onclick="openCancelModifyModal()">예약 취소 / 변경</button>
+    <div class="d-flex justify-content-end mb-3 gap-2">
+        <button class="btn btn-secondary" onclick="openCheckCancelModal()">예약 취소 / 변경</button>
+        <button class="btn btn-primary" onclick="openBookingModal('new')">새 예약하기</button>
     </div>
 
-    <div class="card shadow-sm">
-        <div class="card-header bg-white fw-bold">📅 주간 예약 현황표</div> <div class="card-body">
-            <ul class="nav nav-tabs mb-3" id="timetableTabs"></ul>
-            <div class="table-responsive">
-                <table class="table table-bordered text-center table-sm" style="font-size: 0.9rem;">
-                    <thead class="table-light">
-                        <tr>
-                            <th>시간</th>
-                            <th>Room 1</th><th>Room 2</th><th>Room 3</th><th>Room 4</th><th>Room 5</th>
-                        </tr>
-                    </thead>
-                    <tbody id="timetableBody"></tbody>
-                </table>
-            </div>
+    <ul class="nav nav-tabs" id="weekTabs">
+        </ul>
+    <div class="tab-content border border-top-0 bg-white p-3" id="weekTabContent">
         </div>
-    </div>
 </div>
 
-<div class="modal fade" id="reservationModal" tabindex="-1">
+<div class="modal fade" id="bookingModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title fw-bold" id="resModalTitle">예약하기</h5>
+                <h5 class="modal-title" id="bookingModalTitle">새 예약하기</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="bookingForm">
-                    <div class="mb-3">
-                        <label class="form-label">날짜 선택</label>
-                        <select class="form-select" id="inputDate" required onchange="updateTimeOptions()">
-                            <option value="">-선택해주세요-</option>
-                        </select>
+                    <input type="hidden" id="editModeData" value=""> <div class="mb-3">
+                        <label class="form-label">날짜</label>
+                        <select class="form-select" id="dateSelect" onchange="updateTimeOptions()"></select>
                     </div>
-
                     <div class="mb-3">
                         <label class="form-label">룸 선택</label>
-                        <select class="form-select" id="inputRoom" required>
+                        <select class="form-select" id="roomSelect">
                             <option value="">-선택해주세요-</option>
                             <option value="Room 1">Room 1 (일반)</option>
                             <option value="Room 2">Room 2 (일반)</option>
-                            <option value="Room 3">Room 3 (GDR+, 스윙분석)</option>
+                            <option value="Room 3">Room 3 (스윙분석/GDR+)</option>
                             <option value="Room 4">Room 4 (양손잡이)</option>
                             <option value="Room 5">Room 5 (개인훈련)</option>
                         </select>
                     </div>
-
-                    <div class="row">
-                        <div class="col-6 mb-3">
-                            <label class="form-label">인원수</label>
-                            <select class="form-select" id="inputPax" required onchange="handlePaxChange()">
-                                <option value="">-선택-</option>
-                                <option value="1">1명 (최대 1시간)</option>
-                                <option value="2">2명 (최대 2시간)</option>
-                                <option value="3+">3명 이상 (최대 3시간)</option>
-                            </select>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <label class="form-label">이용 시간</label>
-                            <select class="form-select" id="inputDuration" required onchange="updateTimeOptions()">
-                                <option value="">-선택-</option>
-                            </select>
-                        </div>
+                    <div class="mb-3">
+                        <label class="form-label">인원</label>
+                        <select class="form-select" id="headCountSelect" onchange="updateDurationAndNames()">
+                            <option value="">-선택해주세요-</option>
+                            <option value="1">1인 (최대 1시간)</option>
+                            <option value="2">2인 (최대 2시간)</option>
+                            <option value="3">3인 이상 (최대 3시간)</option>
+                        </select>
                     </div>
+                    
+                    <div id="nameInputsArea" class="mb-3"></div>
 
                     <div class="mb-3">
-                        <label class="form-label">시작 시간</label>
-                        <select class="form-select" id="inputStartTime" required>
+                        <label class="form-label">이용 시간 (시간)</label>
+                        <select class="form-select" id="durationSelect" onchange="updateTimeOptions()">
                             <option value="">-선택해주세요-</option>
                         </select>
-                        <small class="text-muted" id="timeHelpText"></small>
                     </div>
-
                     <div class="mb-3">
-                        <label class="form-label">참가자 명단</label>
-                        <div id="nameListContainer"></div>
-                        <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="btnAddName" style="display:none;" onclick="addNameField()">+ 인원 추가</button>
+                        <label class="form-label">시작 시간</label>
+                        <select class="form-select" id="startTimeSelect">
+                            <option value="">-먼저 이용 시간을 선택하세요-</option>
+                        </select>
+                        <div class="form-text text-danger" id="timeInfoText"></div>
                     </div>
-
-                    <div class="alert alert-warning py-2" style="font-size: 0.85rem;">
-                        ※ 예약 취소/변경 시 필요한 비밀번호를 설정하세요.
-                    </div>
-                    <div class="row">
-                        <div class="col-6 mb-3">
-                            <input type="password" class="form-control" id="inputPw" placeholder="비밀번호 입력" maxlength="4">
-                        </div>
-                        <div class="col-6 mb-3">
-                            <input type="password" class="form-control" id="inputPwConfirm" placeholder="비밀번호 확인" maxlength="4">
-                        </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">비밀번호 (숫자 4자리)</label>
+                        <input type="password" class="form-control mb-1" id="pw1" placeholder="비밀번호" maxlength="4">
+                        <input type="password" class="form-control" id="pw2" placeholder="비밀번호 확인" maxlength="4">
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
                 <button type="button" class="btn btn-primary" onclick="submitReservation()">예약 확정</button>
             </div>
         </div>
     </div>
 </div>
 
-<div class="modal fade" id="manageModal" tabindex="-1">
+<div class="modal fade" id="listModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">예약 취소 / 변경</h5>
+                <h5 class="modal-title">내 예약 조회/취소/변경</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small">변경하려면 [변경] 버튼을 눌러 기존 예약을 삭제 후 내용을 불러옵니다.</p>
-                <div class="list-group" id="manageList">
+                <div id="bookingListGroup" class="list-group">
                     </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="pwCheckModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">비밀번호 확인</h5>
+            </div>
+            <div class="modal-body">
+                <p id="pwCheckMsg">예약 시 설정한 비밀번호를 입력하세요.</p>
+                <input type="password" class="form-control" id="checkPwInput" maxlength="4">
+                <input type="hidden" id="targetBookingId">
+                <input type="hidden" id="targetAction"> </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="processAction()">확인</button>
             </div>
         </div>
     </div>
@@ -156,424 +136,473 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // ==========================================
-    // ⚠️ [중요] 배포된 GAS URL을 여기에 입력하세요
-    // ==========================================
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxmDKhK6_i6oSu3TOcJ7UnkPp5rkBPFSXz_1UqWUAIYac911GWnVVae_Dxpei9ladBj/exec"; 
+    // *** 여기에 배포된 GAS 웹 앱 URL을 붙여넣으세요 ***
+    const API_URL = "https://script.google.com/macros/s/AKfycbx7jrEzAQLOqpZ0n1JCCPWEe4OcIBD4yx_GuQZnzevZWB55ofWPsvqcN2EDRqWvJg_w/exec";
 
-    let allReservations = [];
-    let currentTabDateStr = ""; // "2026년 02월 10일" 형식으로 저장
-
-    document.addEventListener('DOMContentLoaded', () => {
-        // 오늘 날짜로 초기화
-        currentTabDateStr = getKoreanDateStr(new Date());
-        
-        initDateDropdown(); 
-        initTimetableTabs(); 
-        fetchReservations(); 
+    let bookingsData = [];
+    let rooms = ["Room 1", "Room 2", "Room 3", "Room 4", "Room 5"];
+    let today = new Date();
+    
+    // 페이지 로드 시
+    document.addEventListener("DOMContentLoaded", function() {
+        loadData();
     });
 
-    // [핵심 함수 1] 날짜 객체 -> "yyyy년 mm월 dd일" 문자열 변환
-    function getKoreanDateStr(dateObj) {
-        const year = dateObj.getFullYear();
-        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const day = String(dateObj.getDate()).padStart(2, '0');
-        return `${year}년 ${month}월 ${day}일`;
+    function showLoading(show) {
+        document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
     }
 
-    // [핵심 함수 2] "yyyy년 mm월 dd일" -> "yyyy-mm-dd" (input 태그용) 변환
-    function parseKoreanToIso(koreanStr) {
-        // "2026년 02월 10일" -> "2026-02-10"
-        return koreanStr.replace('년 ', '-').replace('월 ', '-').replace('일', '');
-    }
-
-    // 1. 데이터 가져오기
-    function fetchReservations() {
+    function loadData() {
         showLoading(true);
-        fetch(GAS_URL)
-            .then(res => res.json())
-            .then(json => {
-                if(json.status === 'success') {
-                    allReservations = json.data;
-                    renderRoomStatus();
-                    renderTimetable(currentTabDateStr);
-                }
-            })
-            .catch(err => console.error(err))
-            .finally(() => showLoading(false));
-    }
-
-    // 2. 주간 타임테이블 탭 생성
-    function initTimetableTabs() {
-        const ul = document.getElementById('timetableTabs');
-        ul.innerHTML = '';
-        const today = new Date();
-        
-        for(let i=0; i<7; i++) {
-            const d = new Date(today);
-            d.setDate(today.getDate() + i);
-            const kDate = getKoreanDateStr(d); // "yyyy년 mm월 dd일"
-            
-            const activeClass = (i === 0) ? 'active' : '';
-            
-            ul.innerHTML += `
-                <li class="nav-item">
-                    <a class="nav-link ${activeClass}" href="#" onclick="switchTab('${kDate}', this); return false;">
-                        ${d.getMonth()+1}/${d.getDate()} (${getDayName(d.getDay())})
-                    </a>
-                </li>
-            `;
-        }
-    }
-
-    function switchTab(kDate, el) {
-        document.querySelectorAll('#timetableTabs .nav-link').forEach(a => a.classList.remove('active'));
-        el.classList.add('active');
-        currentTabDateStr = kDate;
-        renderTimetable(currentTabDateStr);
-    }
-    
-    // 3. 타임테이블 렌더링 (글자 대 글자 비교로 아주 정확함)
-    function renderTimetable(targetKDate) {
-        const tbody = document.getElementById('timetableBody');
-        tbody.innerHTML = '';
-        
-        // 요일 구하기 (문자열 -> Date 변환)
-        const isoDate = parseKoreanToIso(targetKDate);
-        const day = new Date(isoDate).getDay();
-        
-        // 운영 시간 설정
-        let start, end;
-        if ([6, 0, 1, 2, 3].includes(day)) { start = 19; end = 22; } // 토~수
-        else if (day === 4) { start = 17; end = 22; } // 목
-        else { start = 6; end = 22; } // 금
-
-        for (let h = start; h < end; h++) {
-            let rowHtml = `<tr><td class="align-middle">${h}:00</td>`;
-            
-            for (let r = 1; r <= 5; r++) {
-                const roomName = `Room ${r}`;
-                
-                const booking = allReservations.find(res => {
-                    // [비교 로직] 둘 다 "yyyy년 mm월 dd일" 형식이므로 단순 비교 가능
-                    const isDateMatch = (res.Date === targetKDate);
-                    const isRoomMatch = (res.Room === roomName);
-                    
-                    const resStart = parseInt(res.StartTime);
-                    const resDuration = parseInt(res.Duration);
-                    const isTimeMatch = (h >= resStart && h < (resStart + resDuration));
-
-                    return isDateMatch && isRoomMatch && isTimeMatch;
-                });
-
-                if (booking) {
-                    rowHtml += `<td class="bg-occupied align-middle text-white" style="font-size:0.85rem;">
-                        <div class="fw-bold">${booking.Names}</div>
-                    </td>`;
-                } else {
-                    rowHtml += `<td></td>`;
-                }
+        fetch(`${API_URL}?action=getInitData`)
+        .then(res => res.json())
+        .then(data => {
+            if(data.status === 'success') {
+                bookingsData = data.bookings;
+                renderStatusBoard();
+                renderWeeklyTabs();
             }
-            rowHtml += `</tr>`;
-            tbody.innerHTML += rowHtml;
-        }
+            showLoading(false);
+        })
+        .catch(err => {
+            alert("데이터 로드 실패: " + err);
+            showLoading(false);
+        });
     }
 
-    // 4. 실시간 현황 렌더링
-    function renderRoomStatus() {
-        const container = document.getElementById('roomStatusContainer');
-        container.innerHTML = '';
+    // --- 1. 현황판 로직 ---
+    function renderStatusBoard() {
+        const board = document.getElementById('statusBoard');
+        board.innerHTML = '';
         
-        const rooms = [
-            { id: 'Room 1', desc: '일반' }, { id: 'Room 2', desc: '일반' },
-            { id: 'Room 3', desc: 'GDR+' }, { id: 'Room 4', desc: '양손' }, { id: 'Room 5', desc: '개인' }
-        ];
-
         const now = new Date();
-        const todayKDate = getKoreanDateStr(now); // "2026년 02월 10일"
         const currentHour = now.getHours();
-        const day = now.getDay(); 
-
-        let openHour, closeHour;
-        if (day === 4) { openHour = 17; closeHour = 22; }
-        else if (day === 5) { openHour = 6; closeHour = 22; }
-        else { openHour = 19; closeHour = 22; }
-
-        const isClosed = (currentHour < openHour || currentHour >= closeHour);
+        const currentDay = now.getDay(); // 0(일)~6(토)
+        
+        // 운영시간 체크
+        let isOpen = false;
+        // 목: 17-22, 금: 06-22, 그외: 19-22
+        if (currentDay === 4) { if(currentHour >= 17 && currentHour < 22) isOpen = true; }
+        else if (currentDay === 5) { if(currentHour >= 6 && currentHour < 22) isOpen = true; }
+        else { if(currentHour >= 19 && currentHour < 22) isOpen = true; }
 
         rooms.forEach(room => {
-            let statusClass, statusText;
-
-            if (isClosed) {
-                statusClass = 'bg-closed';
-                statusText = '이용 불가 (운영시간 아님)';
+            let statusClass = 'status-available';
+            let statusText = '사용 가능';
+            
+            if (!isOpen) {
+                statusClass = 'status-closed';
+                statusText = '운영 시간 아님';
             } else {
-                const activeRes = allReservations.find(res => {
-                    const start = parseInt(res.StartTime);
-                    const end = start + parseInt(res.Duration);
-                    
-                    return (res.Date === todayKDate) && 
-                           (res.Room === room.id) && 
-                           (currentHour >= start && currentHour < end);
-                });
+                // 현재 시간 예약 확인
+                // 날짜 포맷 yyyy-MM-dd
+                const todayStr = getFormatDate(now);
+                const activeBooking = bookingsData.find(b => 
+                    b.room === room && 
+                    b.date === todayStr &&
+                    parseInt(b.startTime.split(':')[0]) <= currentHour &&
+                    (parseInt(b.startTime.split(':')[0]) + parseInt(b.duration)) > currentHour
+                );
 
-                if (activeRes) {
-                    statusClass = 'bg-occupied';
-                    statusText = `사용 중 (${activeRes.Names})`;
-                } else {
-                    statusClass = 'bg-available';
-                    statusText = '사용 가능';
+                if (activeBooking) {
+                    statusClass = 'status-occupied';
+                    statusText = `사용 중 (${activeBooking.mainName})`;
                 }
             }
 
             const col = document.createElement('div');
-            col.className = 'col-6 col-md-2dot4'; 
-            col.style.width = '20%'; 
-            if(window.innerWidth < 768) col.style.width = '50%';
-
+            col.className = 'col-md';
             col.innerHTML = `
-                <div class="card room-card shadow-sm border-0">
-                    <div class="fw-bold">${room.id}</div>
-                    <small class="text-muted">${room.desc}</small>
-                    <div class="room-status-box ${statusClass}">${statusText}</div>
-                </div>`;
-            container.appendChild(col);
+                <div class="room-box ${statusClass}">
+                    <h5>${room}</h5>
+                    <p class="mb-0">${statusText}</p>
+                </div>
+            `;
+            board.appendChild(col);
         });
     }
 
-    // 5. 예약 모달 (입력은 달력input을 쓰지만, 값은 한국어로 변환해서 표시)
-    function initDateDropdown() {
-        const select = document.getElementById('inputDate');
-        select.innerHTML = '<option value="">-선택해주세요-</option>';
-        const today = new Date();
-        
-        for(let i=0; i<7; i++) {
-            const d = new Date(today);
+    // --- 2. 주간 예약표 로직 ---
+    function renderWeeklyTabs() {
+        const tabs = document.getElementById('weekTabs');
+        const content = document.getElementById('weekTabContent');
+        tabs.innerHTML = '';
+        content.innerHTML = '';
+
+        for (let i = 0; i < 7; i++) {
+            let d = new Date();
             d.setDate(today.getDate() + i);
+            let dateStr = getFormatDate(d);
+            let label = `${d.getMonth()+1}/${d.getDate()} (${getDayName(d.getDay())})`;
             
-            const isoVal = getFormatIso(d); // value는 "yyyy-mm-dd" (그래야 요일계산 쉬움)
-            const txt = `${d.getMonth()+1}월 ${d.getDate()}일 (${getDayName(d.getDay())})`;
-            select.innerHTML += `<option value="${isoVal}">${txt}</option>`;
+            // Tab
+            let activeClass = i === 0 ? 'active' : '';
+            tabs.innerHTML += `
+                <li class="nav-item">
+                    <button class="nav-link ${activeClass}" data-bs-toggle="tab" data-bs-target="#tab-${i}">${label}</button>
+                </li>
+            `;
+
+            // Content
+            let activeShow = i === 0 ? 'show active' : '';
+            let tableHTML = createTimeTable(dateStr, d.getDay());
+            content.innerHTML += `
+                <div class="tab-pane fade ${activeShow}" id="tab-${i}">
+                    ${tableHTML}
+                </div>
+            `;
         }
     }
-    
-    // ISO 형식 날짜 반환 (YYYY-MM-DD)
-    function getFormatIso(dateObj) {
-        const year = dateObj.getFullYear();
-        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const day = String(dateObj.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    }
 
-    // 6. 예약 제출 (여기서 한국어 포맷으로 변환해서 서버로 보냄)
-    function submitReservation() {
-        const isoDate = document.getElementById('inputDate').value; // "2026-02-10"
-        const room = document.getElementById('inputRoom').value;
-        const pax = document.getElementById('inputPax').value;
-        const duration = document.getElementById('inputDuration').value;
-        const startTime = document.getElementById('inputStartTime').value;
-        const pw = document.getElementById('inputPw').value;
-        const pwConfirm = document.getElementById('inputPwConfirm').value;
-
-        const nameInputs = document.querySelectorAll('.name-input');
-        let namesArr = [];
-        nameInputs.forEach(input => { if(input.value.trim()) namesArr.push(input.value.trim()); });
-
-        if(!isoDate || !room || !pax || !duration || !startTime || !pw || !pwConfirm) { alert('모든 항목을 입력하세요.'); return; }
-        if(namesArr.length === 0) { alert('참가자 이름을 입력하세요.'); return; }
-        if(pw !== pwConfirm) { alert('비밀번호가 일치하지 않습니다.'); return; }
-
-        // [중요] 서버로 보낼 때 "yyyy년 mm월 dd일"로 변환
-        const dateObj = new Date(isoDate);
-        const koreanDate = getKoreanDateStr(dateObj);
-
-        const payload = {
-            action: 'book',
-            date: koreanDate, // 변환된 한국어 날짜 전송
-            room: room,
-            pax: (pax === '3+') ? `${namesArr.length}명` : `${pax}명`,
-            duration: duration,
-            startTime: startTime,
-            names: namesArr.join(', '),
-            password: pw
-        };
-
-        if(!confirm(`예약하시겠습니까?\n${koreanDate} ${startTime}시 (${duration}시간)`)) return;
-        processApi(payload, () => {
-            bootstrap.Modal.getInstance(document.getElementById('reservationModal')).hide();
-        });
-    }
-
-    // 7. 취소/변경 관리
-    function openCancelModifyModal() {
-        const listDiv = document.getElementById('manageList');
-        listDiv.innerHTML = '';
+    function createTimeTable(dateStr, dayIdx) {
+        // 운영시간 계산
+        let startH = 19; 
+        if(dayIdx === 4) startH = 17; // 목
+        if(dayIdx === 5) startH = 6;  // 금
         
-        // 오늘 날짜 (한국어 포맷)
-        const todayKDate = getKoreanDateStr(new Date());
+        let hours = [];
+        for(let h=startH; h<22; h++) hours.push(h);
 
-        const futureRes = allReservations.filter(r => {
-             // 문자열 비교 (년, 월, 일이 앞에 있으므로 문자열 크기 비교 가능)
-             return r.Date >= todayKDate;
-        });
-        
-        if(futureRes.length === 0) {
-            listDiv.innerHTML = '<p class="text-center p-3">예약 내역이 없습니다.</p>';
-        } else {
-            // 정렬
-            futureRes.sort((a,b) => (a.Date + a.StartTime).localeCompare(b.Date + b.StartTime));
-            
-            futureRes.forEach(res => {
-                const item = document.createElement('div');
-                item.className = 'list-group-item d-flex justify-content-between align-items-center';
-                item.innerHTML = `
-                    <div>
-                        <span class="badge bg-primary me-2">${res.Date}</span>
-                        <span class="fw-bold">${res.StartTime}시 (${res.Duration}시간)</span>
-                        <span class="ms-2 text-muted">${res.Room}</span>
-                        <div class="small text-muted">예약자: ${res.Names}</div>
-                    </div>
-                    <div>
-                        <button class="btn btn-sm btn-outline-warning me-1" onclick="modifyReservation('${res.ID}')">변경</button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="cancelReservation('${res.ID}')">취소</button>
-                    </div>`;
-                listDiv.appendChild(item);
+        let html = `<div class="table-responsive"><table class="table table-bordered schedule-table"><thead><tr><th>Room / Time</th>`;
+        hours.forEach(h => html += `<th>${h}:00</th>`);
+        html += `</tr></thead><tbody>`;
+
+        rooms.forEach(room => {
+            html += `<tr><td>${room}</td>`;
+            hours.forEach(h => {
+                // 해당 시간 예약 찾기
+                const booking = bookingsData.find(b => 
+                    b.room === room && 
+                    b.date === dateStr && 
+                    parseInt(b.startTime.split(':')[0]) <= h &&
+                    (parseInt(b.startTime.split(':')[0]) + parseInt(b.duration)) > h
+                );
+
+                if(booking) {
+                    html += `<td class="reserved-cell">${booking.mainName}</td>`;
+                } else {
+                    html += `<td></td>`;
+                }
             });
-        }
-        new bootstrap.Modal(document.getElementById('manageModal')).show();
-    }
-
-    function cancelReservation(id) {
-        const pw = prompt("비밀번호 입력:");
-        if(!pw) return;
-        processApi({ action: 'cancel', id: id, password: pw }, () => {
-            bootstrap.Modal.getInstance(document.getElementById('manageModal')).hide();
+            html += `</tr>`;
         });
+        html += `</tbody></table></div>`;
+        return html;
     }
 
-    function modifyReservation(id) {
-        const targetRes = allReservations.find(r => String(r.ID) === String(id));
-        if(!targetRes) return;
-        const pw = prompt("변경(삭제)을 위한 비밀번호 입력:");
-        if(!pw) return;
-
-        showLoading(true);
-        fetch(GAS_URL, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'cancel', id: id, password: pw })
-        })
-        .then(res => res.json())
-        .then(json => {
-            showLoading(false);
-            if(json.status === 'success') {
-                bootstrap.Modal.getInstance(document.getElementById('manageModal')).hide();
-                setTimeout(() => {
-                    openNewReservation(); 
-                    // [중요] 한국어 날짜를 다시 input용 iso 날짜로 변환해서 채워넣기
-                    document.getElementById('inputDate').value = parseKoreanToIso(targetRes.Date);
-                    document.getElementById('inputRoom').value = targetRes.Room;
-                    updateTimeOptions(); 
-                    alert('기존 예약 삭제 완료. 내용을 수정한 뒤 다시 예약해주세요.');
-                }, 500);
-            } else { alert(json.message); }
-        });
-    }
-
-    // UI 헬퍼들
-    function handlePaxChange() {
-        const paxVal = document.getElementById('inputPax').value;
-        const durationSelect = document.getElementById('inputDuration');
-        const nameContainer = document.getElementById('nameListContainer');
-        const btnAdd = document.getElementById('btnAddName');
+    // --- 3. 예약하기 폼 로직 ---
+    let bookingModal;
+    
+    function openBookingModal(mode, prefillData = null) {
+        bookingModal = new bootstrap.Modal(document.getElementById('bookingModal'));
         
-        durationSelect.innerHTML = '<option value="">-선택-</option>';
-        if(!paxVal) {
-            nameContainer.innerHTML = '';
-            btnAdd.style.display = 'none';
-            return;
+        // 폼 초기화
+        document.getElementById('bookingForm').reset();
+        document.getElementById('nameInputsArea').innerHTML = '';
+        document.getElementById('startTimeSelect').innerHTML = '<option value="">-먼저 이용 시간을 선택하세요-</option>';
+        document.getElementById('timeInfoText').innerText = '';
+        
+        // 날짜 드롭다운 세팅 (7일)
+        const dateSel = document.getElementById('dateSelect');
+        dateSel.innerHTML = '<option value="">-선택해주세요-</option>';
+        for(let i=0; i<7; i++) {
+            let d = new Date();
+            d.setDate(today.getDate() + i);
+            let val = getFormatDate(d);
+            let txt = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
+            dateSel.innerHTML += `<option value="${val}">${txt}</option>`;
         }
 
-        let maxTime = 1;
-        let initialNameCount = 1;
-        
-        if (paxVal === '2') { maxTime = 2; initialNameCount = 2; btnAdd.style.display = 'none'; }
-        else if (paxVal === '3+') { maxTime = 3; initialNameCount = 3; btnAdd.style.display = 'inline-block'; }
-        else { btnAdd.style.display = 'none'; }
+        if(mode === 'modify' && prefillData) {
+            document.getElementById('bookingModalTitle').innerText = '예약 변경 (기존 예약 삭제 후 재입력)';
+            // 데이터 채우기 (Date, Room, HeadCount, Duration 등)
+            // 주의: UI 업데이트 트리거 필요
+            dateSel.value = prefillData.date;
+            document.getElementById('roomSelect').value = prefillData.room;
+            
+            // 인원 처리
+            let hc = prefillData.headCount;
+            let hcVal = hc >= 3 ? '3' : hc.toString();
+            document.getElementById('headCountSelect').value = hcVal;
+            updateDurationAndNames(); // 인원칸 생성
+            
+            // 이름 채우기
+            let names = prefillData.allNames.split(',');
+            if(names.length > 0) document.getElementById('name1').value = names[0];
+            if(names.length > 1 && document.getElementById('name2')) document.getElementById('name2').value = names[1];
+            // 3인 이상 추가 로직은 복잡도를 줄이기 위해 기본 생성된 칸에만 채우고, 추가 인원은 사용자가 다시 버튼 눌러야 함 (간소화)
+            
+            // 시간 처리
+            document.getElementById('durationSelect').value = prefillData.duration;
+            updateTimeOptions(); // 시작시간 옵션 생성
+            document.getElementById('startTimeSelect').value = prefillData.startTime;
+        } else {
+             document.getElementById('bookingModalTitle').innerText = '새 예약하기';
+        }
 
-        for(let i=1; i<=maxTime; i++) durationSelect.innerHTML += `<option value="${i}">${i}시간</option>`;
-        nameContainer.innerHTML = '';
-        for(let i=0; i<initialNameCount; i++) addNameField(false);
-        updateTimeOptions(); 
+        bookingModal.show();
     }
 
-    function addNameField(showDeleteBtn = true) {
-        const container = document.getElementById('nameListContainer');
-        const div = document.createElement('div');
-        div.className = 'input-group mb-2';
-        let html = `<input type="text" class="form-control name-input" placeholder="이름" required>`;
-        if(showDeleteBtn) html += `<button type="button" class="btn btn-outline-danger" onclick="this.parentElement.remove()">삭제</button>`;
-        div.innerHTML = html;
-        container.appendChild(div);
+    function updateDurationAndNames() {
+        const hc = document.getElementById('headCountSelect').value;
+        const durSel = document.getElementById('durationSelect');
+        const nameArea = document.getElementById('nameInputsArea');
+        
+        durSel.innerHTML = '<option value="">-선택해주세요-</option>';
+        nameArea.innerHTML = '';
+
+        if (!hc) return;
+
+        let maxTime = parseInt(hc);
+        if (hc === '3') maxTime = 3;
+
+        // 시간 옵션
+        for(let i=1; i<=maxTime; i++) {
+            durSel.innerHTML += `<option value="${i}">${i}시간</option>`;
+        }
+
+        // 이름 입력칸 생성
+        nameArea.innerHTML += `<input type="text" class="form-control mb-1" id="name1" placeholder="참가자 1 이름 (필수)">`;
+        if (hc === '2') {
+            nameArea.innerHTML += `<input type="text" class="form-control mb-1" id="name2" placeholder="참가자 2 이름 (필수)">`;
+        } else if (hc === '3') {
+            nameArea.innerHTML += `<input type="text" class="form-control mb-1" id="name2" placeholder="참가자 2 이름 (필수)">`;
+            nameArea.innerHTML += `<input type="text" class="form-control mb-1" id="name3" placeholder="참가자 3 이름 (필수)">`;
+            nameArea.innerHTML += `
+                <div id="extraNames"></div>
+                <div class="mt-1">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="addNameField()">+ 인원 추가</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeNameField()">- 삭제</button>
+                </div>
+            `;
+        }
+    }
+
+    function addNameField() {
+        const container = document.getElementById('extraNames');
+        const count = container.children.length + 4;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control mb-1';
+        input.placeholder = `참가자 ${count} 이름`;
+        container.appendChild(input);
+    }
+
+    function removeNameField() {
+        const container = document.getElementById('extraNames');
+        if(container.lastChild) container.removeChild(container.lastChild);
     }
 
     function updateTimeOptions() {
-        const dateVal = document.getElementById('inputDate').value;
-        const durationVal = parseInt(document.getElementById('inputDuration').value);
-        const timeSelect = document.getElementById('inputStartTime');
-        const helpText = document.getElementById('timeHelpText');
+        const dateVal = document.getElementById('dateSelect').value;
+        const durVal = parseInt(document.getElementById('durationSelect').value);
+        const timeSel = document.getElementById('startTimeSelect');
+        const msg = document.getElementById('timeInfoText');
         
-        timeSelect.innerHTML = '<option value="">-선택해주세요-</option>';
-        helpText.innerText = '';
+        timeSel.innerHTML = '<option value="">-선택해주세요-</option>';
+        msg.innerText = '';
 
-        if(!dateVal || !durationVal) return;
+        if (!dateVal || !durVal) return;
 
-        const date = new Date(dateVal);
-        const day = date.getDay();
+        // 요일 파악
+        const targetDate = new Date(dateVal);
+        const dayIdx = targetDate.getDay();
         
-        let openHour, closeHour;
-        if (day === 4) { openHour = 17; closeHour = 22; }
-        else if (day === 5) { openHour = 6; closeHour = 22; }
-        else { openHour = 19; closeHour = 22; }
+        let startOp = 19;
+        if (dayIdx === 4) startOp = 17;
+        if (dayIdx === 5) startOp = 6;
+        
+        const closeTime = 22;
 
-        helpText.innerText = "운영 종료 시간: 22:00";
-        const lastPossibleStart = closeHour - durationVal;
-
-        for (let h = openHour; h <= lastPossibleStart; h++) {
-            timeSelect.innerHTML += `<option value="${h}">${h}:00 (종료 ${h+durationVal}:00)</option>`;
+        // 필터링 로직: 시작시간 + 이용시간 <= 22
+        let valid = false;
+        for (let t = startOp; t < closeTime; t++) {
+            if (t + durVal <= closeTime) {
+                timeSel.innerHTML += `<option value="${t}:00">${t}:00</option>`;
+                valid = true;
+            }
         }
-        if (lastPossibleStart < openHour) timeSelect.innerHTML = '<option value="">이용 가능한 시간이 없습니다</option>';
+        
+        if(!valid) {
+            msg.innerText = "선택한 이용 시간으로는 예약 가능한 시작 시간이 없습니다. (22:00 마감)";
+        }
     }
 
-    function openNewReservation() {
-        document.getElementById('bookingForm').reset();
-        document.getElementById('nameListContainer').innerHTML = '';
-        document.getElementById('btnAddName').style.display = 'none';
-        document.getElementById('inputDuration').innerHTML = '<option value="">-선택-</option>';
-        document.getElementById('inputStartTime').innerHTML = '<option value="">-선택해주세요-</option>';
-        new bootstrap.Modal(document.getElementById('reservationModal')).show();
-    }
+    function submitReservation() {
+        // 유효성 검사
+        const room = document.getElementById('roomSelect').value;
+        const date = document.getElementById('dateSelect').value;
+        const startTime = document.getElementById('startTimeSelect').value;
+        const duration = document.getElementById('durationSelect').value;
+        const hcVal = document.getElementById('headCountSelect').value;
+        const pw1 = document.getElementById('pw1').value;
+        const pw2 = document.getElementById('pw2').value;
 
-    function processApi(payload, onSuccess) {
+        if (!room || !date || !startTime || !duration || !hcVal) {
+            alert("모든 항목을 선택해주세요."); return;
+        }
+
+        // 이름 수집
+        let names = [];
+        const inputs = document.querySelectorAll('#nameInputsArea input');
+        let allFilled = true;
+        inputs.forEach(input => {
+            if(!input.value.trim()) allFilled = false;
+            names.push(input.value.trim());
+        });
+
+        if(!allFilled) {
+            alert("모든 참가자의 이름을 입력해주세요."); return;
+        }
+
+        if (pw1.length !== 4 || isNaN(pw1)) {
+            alert("비밀번호는 숫자 4자리여야 합니다."); return;
+        }
+        if (pw1 !== pw2) {
+            alert("비밀번호가 일치하지 않습니다."); return;
+        }
+
+        // 전송
+        const payload = {
+            action: 'makeReservation',
+            room: room,
+            date: date,
+            startTime: startTime,
+            duration: duration,
+            headCount: names.length,
+            mainName: names[0],
+            allNames: names.join(','),
+            password: pw1
+        };
+
         showLoading(true);
-        fetch(GAS_URL, {
+        fetch(API_URL, {
             method: 'POST',
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload) // no-cors 모드가 아니므로 body 전송 가능
         })
         .then(res => res.json())
-        .then(json => {
-            if(json.status === 'success') {
-                alert(json.message);
-                fetchReservations();
-                if(onSuccess) onSuccess();
-            } else { alert('실패: ' + json.message); }
+        .then(data => {
+            showLoading(false);
+            if(data.status === 'success') {
+                alert("예약되었습니다!");
+                bookingModal.hide();
+                loadData(); // 새로고침
+            } else {
+                alert("실패: " + data.message);
+            }
         })
-        .catch(err => { console.error(err); alert('오류 발생'); })
-        .finally(() => showLoading(false));
+        .catch(err => {
+            showLoading(false);
+            alert("오류 발생: " + err);
+        });
     }
 
-    function showLoading(show) { document.getElementById('loading').style.display = show ? 'flex' : 'none'; }
-    function getDayName(d) { return ['일','월','화','수','목','금','토'][d]; }
+    // --- 4. 예약 취소/변경 로직 ---
+    let targetBooking = null; // 현재 작업 중인 예약 객체
 
+    function openCheckCancelModal() {
+        showLoading(true);
+        fetch(`${API_URL}?action=getMyBookings`)
+        .then(res => res.json())
+        .then(res => {
+            showLoading(false);
+            const listGroup = document.getElementById('bookingListGroup');
+            listGroup.innerHTML = '';
+            
+            if (res.data.length === 0) {
+                listGroup.innerHTML = '<p class="text-center">예약 내역이 없습니다.</p>';
+            } else {
+                res.data.forEach(b => {
+                    const item = document.createElement('a');
+                    item.className = 'list-group-item list-group-item-action';
+                    item.style.cursor = 'pointer';
+                    item.innerHTML = `
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">${b.date} ${b.startTime} (${b.room})</h5>
+                            <small>${b.mainName} 외 ${b.headCount-1}명</small>
+                        </div>
+                        <p class="mb-1">이용 시간: ${b.duration}시간</p>
+                        <div class="mt-2">
+                            <button class="btn btn-sm btn-outline-danger" onclick="promptPw('${b.id}', 'delete', this)">취소(삭제)</button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="promptPw('${b.id}', 'modify', this)">변경(수정)</button>
+                        </div>
+                    `;
+                    // 데이터 바인딩
+                    item.dataset.json = JSON.stringify(b);
+                    listGroup.appendChild(item);
+                });
+            }
+            new bootstrap.Modal(document.getElementById('listModal')).show();
+        });
+    }
+
+    function promptPw(id, action, btn) {
+        // 클릭된 요소의 데이터 가져오기
+        const json = btn.closest('.list-group-item').dataset.json;
+        targetBooking = JSON.parse(json);
+        
+        document.getElementById('targetBookingId').value = id;
+        document.getElementById('targetAction').value = action;
+        document.getElementById('checkPwInput').value = '';
+        
+        // 리스트 모달 닫지 않고 그 위에 띄움 (z-index 자동 처리됨)
+        new bootstrap.Modal(document.getElementById('pwCheckModal')).show();
+    }
+
+    function processAction() {
+        const id = document.getElementById('targetBookingId').value;
+        const action = document.getElementById('targetAction').value;
+        const pw = document.getElementById('checkPwInput').value;
+
+        // 비밀번호 검증 API 호출
+        showLoading(true);
+        fetch(`${API_URL}?action=verifyPassword&bookingId=${id}&password=${pw}`)
+        .then(res => res.json())
+        .then(data => {
+            if(data.status === 'success') {
+                // 비밀번호 맞음 -> 삭제 로직 수행
+                doDelete(id, action);
+            } else {
+                showLoading(false);
+                alert("비밀번호가 틀렸습니다.");
+            }
+        });
+    }
+
+    function doDelete(id, nextAction) {
+        fetch(`${API_URL}?action=cancelBooking&bookingId=${id}`)
+        .then(res => res.json())
+        .then(data => {
+            showLoading(false);
+            // 모달들 닫기
+            bootstrap.Modal.getInstance(document.getElementById('pwCheckModal')).hide();
+            bootstrap.Modal.getInstance(document.getElementById('listModal')).hide();
+
+            if (nextAction === 'delete') {
+                alert("예약이 취소되었습니다.");
+                loadData();
+            } else if (nextAction === 'modify') {
+                // 수정 모드: 삭제 완료 후 -> 예약창 열고 데이터 채우기
+                // targetBooking 변수에 삭제된 정보가 들어있음
+                setTimeout(() => {
+                    openBookingModal('modify', targetBooking);
+                }, 500);
+            }
+        });
+    }
+
+    // 유틸
+    function getFormatDate(date) {
+        let yyyy = date.getFullYear();
+        let mm = date.getMonth() + 1;
+        let dd = date.getDate();
+        if(mm<10) mm='0'+mm;
+        if(dd<10) dd='0'+dd;
+        return `${yyyy}-${mm}-${dd}`;
+    }
+    function getDayName(d) {
+        return ['일','월','화','수','목','금','토'][d];
+    }
 </script>
 </body>
 </html>
